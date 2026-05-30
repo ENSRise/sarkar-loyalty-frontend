@@ -1,21 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const TIER_LABELS = { silver: '🥈 Silver', gold: '🥇 Gold', platinum: '💎 Platinum' };
 
 export default function Register() {
+  const [searchParams] = useSearchParams();
+
+  const [referralCode, setReferralCode] = useState('');
+  const [referralFromUrl, setReferralFromUrl] = useState(false);
+
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
+    email: '',
     phone: '',
     birthdayDate: '',
     anniversaryDate: '',
     address: '',
   });
-  const [errors, setErrors] = useState({});
-  const [status, setStatus] = useState('idle'); // idle | loading | success | error
-  const [result, setResult] = useState(null);
+  const [errors, setErrors]   = useState({});
+  const [status, setStatus]   = useState('idle'); // idle | loading | success | error
+  const [result, setResult]   = useState(null);
   const [apiError, setApiError] = useState('');
+
+  // Auto-fill referral code from ?ref= URL param
+  useEffect(() => {
+    const ref = searchParams.get('ref') || '';
+    if (ref) {
+      setReferralCode('ref' + ref);
+      setReferralFromUrl(true);
+    }
+  }, []);
 
   const set = (field) => (e) =>
     setForm(f => ({ ...f, [field]: e.target.value }));
@@ -40,8 +57,31 @@ export default function Register() {
     setApiError('');
 
     try {
-      const { data } = await axios.post('/api/customers/register', form);
-      setResult(data.data);
+      // Strip the "ref" prefix to get the referrer's phone number
+      const whomReferNumber = referralCode
+        ? referralCode.replace(/^ref/i, '').trim()
+        : '';
+
+      if (whomReferNumber) {
+        // ── Referral flow — use existing referral API ──────────────
+        const { data } = await axios.post(`${API}/api/referral/submit`, {
+          firstName:       form.firstName,
+          lastName:        form.lastName,
+          email:           form.email,
+          phoneNumber:     form.phone,
+          dateOfBirth:     form.birthdayDate,
+          anniversaryDate: form.anniversaryDate,
+          whomReferNumber,
+        });
+        setResult({ isReferral: true, couponCode: data.data?.couponCode, tierBenefits: data.data?.tierBenefits, firstName: form.firstName });
+      } else {
+        // ── Normal registration flow ───────────────────────────────
+        const { data } = await axios.post('/api/customers/register', {
+          ...form,
+        });
+        setResult({ isReferral: false, ...data.data });
+      }
+
       setStatus('success');
     } catch (err) {
       const msg =
@@ -53,8 +93,49 @@ export default function Register() {
     }
   };
 
-  // ── Success screen ──────────────────────────────────────────
+  // ── Success screen ──────────────────────────────────────────────────
   if (status === 'success' && result) {
+    if (result.isReferral) {
+      return (
+        <div className="register-page">
+          <div className="register-container">
+            <div className="register-header">
+              <div className="register-logo">
+                <div className="logo-icon">🏆</div>
+                <div className="logo-name">Loyalty Sarkar</div>
+              </div>
+            </div>
+            <div className="register-card">
+              <div className="success-screen">
+                <div className="success-icon">🎉</div>
+                <h2>Welcome to Loyalty Sarkar!</h2>
+                <p>
+                  Hi <strong>{result.firstName}</strong>! You've been successfully enrolled
+                  via referral and your friend has received their reward.
+                </p>
+                <div className="tier-pill tier-pill-silver">
+                  {TIER_LABELS.silver} Member
+                </div>
+                {result.tierBenefits && (
+                  <div style={{ background: 'var(--primary-light)', borderRadius: 10, padding: 16, textAlign: 'left', marginTop: 4 }}>
+                    <p style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--primary)' }}>Your Benefits</p>
+                    {result.tierBenefits.reward && (
+                      <p style={{ fontSize: 13, color: 'var(--text)', marginBottom: 6 }}>
+                        🎁 <strong>{result.tierBenefits.reward}</strong> reward on every purchase
+                      </p>
+                    )}
+                    {result.tierBenefits.additionReward?.map((b, i) => (
+                      <p key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>✓ {b}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const tier = result.currentTier || 'silver';
     return (
       <div className="register-page">
@@ -65,7 +146,6 @@ export default function Register() {
               <div className="logo-name">Loyalty Sarkar</div>
             </div>
           </div>
-
           <div className="register-card">
             <div className="success-screen">
               <div className="success-icon">🎉</div>
@@ -74,40 +154,24 @@ export default function Register() {
                 Welcome, <strong>{result.firstName}</strong>! You've been successfully
                 enrolled in our loyalty program.
               </p>
-
               <div className={`tier-pill tier-pill-${tier}`}>
                 {TIER_LABELS[tier]} Member
               </div>
-
               {result.tierBenefits && (
-                <div
-                  style={{
-                    background: 'var(--primary-light)',
-                    borderRadius: '10px',
-                    padding: '16px',
-                    textAlign: 'left',
-                    marginTop: '4px',
-                  }}
-                >
-                  <p style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px', color: 'var(--primary)' }}>
-                    Your Benefits
-                  </p>
+                <div style={{ background: 'var(--primary-light)', borderRadius: 10, padding: 16, textAlign: 'left', marginTop: 4 }}>
+                  <p style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--primary)' }}>Your Benefits</p>
                   {result.tierBenefits.reward && (
-                    <p style={{ fontSize: '13px', color: 'var(--text)', marginBottom: '6px' }}>
+                    <p style={{ fontSize: 13, color: 'var(--text)', marginBottom: 6 }}>
                       🎁 <strong>{result.tierBenefits.reward}</strong> reward on every purchase
                     </p>
                   )}
                   {result.tierBenefits.additionReward?.map((b, i) => (
-                    <p key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                      ✓ {b}
-                    </p>
+                    <p key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>✓ {b}</p>
                   ))}
                 </div>
               )}
-
-              <p style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Your tier and benefits are saved to your Shopify account.
-                Keep shopping to unlock higher tiers!
+              <p style={{ marginTop: 16, fontSize: 12, color: 'var(--text-secondary)' }}>
+                Your tier and benefits are saved to your Shopify account. Keep shopping to unlock higher tiers!
               </p>
             </div>
           </div>
@@ -116,7 +180,7 @@ export default function Register() {
     );
   }
 
-  // ── Form ────────────────────────────────────────────────────
+  // ── Form ────────────────────────────────────────────────────────────
   return (
     <div className="register-page">
       <div className="register-container">
@@ -141,7 +205,7 @@ export default function Register() {
 
           <form onSubmit={handleSubmit} noValidate>
 
-            {/* Name */}
+            {/* Personal Details */}
             <div className="form-section-title">Personal Details</div>
             <div className="form-row">
               <div className="form-group">
@@ -168,6 +232,22 @@ export default function Register() {
                 />
                 {errors.lastName && <span className="field-error">⚠ {errors.lastName}</span>}
               </div>
+            </div>
+
+            {/* Email */}
+            <div className="form-group">
+              <label className="form-label">
+                Email Address <span className="optional">(optional)</span>
+              </label>
+              <input
+                className="form-input"
+                type="email"
+                placeholder="you@example.com"
+                value={form.email}
+                onChange={set('email')}
+                autoComplete="email"
+                inputMode="email"
+              />
             </div>
 
             {/* Phone */}
@@ -225,7 +305,7 @@ export default function Register() {
             <div className="form-section-title">Address</div>
 
             {/* Address */}
-            <div className="form-group" style={{ marginBottom: 0 }}>
+            <div className="form-group">
               <label className="form-label">
                 Address <span className="optional">(optional)</span>
               </label>
@@ -237,6 +317,48 @@ export default function Register() {
                 onChange={set('address')}
                 autoComplete="street-address"
               />
+            </div>
+
+            <div className="form-divider" />
+            <div className="form-section-title">Referral</div>
+
+            {/* Referral Code */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">
+                Referral Code <span className="optional">(optional)</span>
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="form-input"
+                  type="text"
+                  inputMode="text"
+                  placeholder="e.g. ref8822334455"
+                  value={referralCode}
+                  onChange={e => setReferralCode(e.target.value)}
+                  readOnly={referralFromUrl}
+                  style={referralFromUrl ? {
+                    background: 'var(--primary-light)',
+                    color: 'var(--primary)',
+                    fontWeight: 600,
+                    border: '1.5px solid #008060',
+                    paddingRight: 36,
+                  } : {}}
+                />
+                {referralFromUrl && (
+                  <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}>
+                    ✅
+                  </span>
+                )}
+              </div>
+              {referralFromUrl ? (
+                <p style={{ fontSize: 12, color: 'var(--primary)', marginTop: 4 }}>
+                  Referral code applied automatically.
+                </p>
+              ) : (
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  If a friend referred you, enter their referral code here.
+                </p>
+              )}
             </div>
 
             <button

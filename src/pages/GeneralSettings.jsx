@@ -58,6 +58,7 @@ export default function GeneralSettings() {
     goldReferralPoint: '',
     platinumReferralPoint: '',
     resetCycle: '6months',
+    orderCreditDate: '10',
   });
   const [accessTokenSet, setAccessTokenSet] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -81,6 +82,7 @@ export default function GeneralSettings() {
           goldReferralPoint:    s.goldReferralPoint    || '150',
           platinumReferralPoint:s.platinumReferralPoint|| '200',
           resetCycle:           s.resetCycle           || '6months',
+          orderCreditDate:      s.orderCreditDate      || '10',
         });
         setAccessTokenSet(!!s.accessTokenSet);
       })
@@ -256,6 +258,27 @@ export default function GeneralSettings() {
                 {opt.label}
               </button>
             ))}
+          </div>
+        </Field>
+
+        <Field
+          label="Order Credit Date (days)"
+          hint="Number of days after order placement before it is eligible for credit. Applied automatically to every new order."
+        >
+          <div style={{ position: 'relative', maxWidth: 200 }}>
+            <input
+              type="number"
+              min="0"
+              value={form.orderCreditDate}
+              onChange={e => set('orderCreditDate', e.target.value)}
+              placeholder="10"
+              style={{ ...inputStyle, paddingRight: 52 }}
+              onFocus={e => e.target.style.borderColor = '#008060'}
+              onBlur={e => e.target.style.borderColor = '#d1d5db'}
+            />
+            <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>
+              days
+            </span>
           </div>
         </Field>
       </SettingCard>

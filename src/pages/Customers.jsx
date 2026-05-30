@@ -85,8 +85,8 @@ const ExportDropdown = ({ onExport, exporting }) => {
         }}>
           <div style={{ padding: '6px' }}>
             {[
-              { format: 'csv', icon: '📊', label: 'Download CSV', sub: 'Spreadsheet format' },
-              { format: 'pdf', icon: '📄', label: 'Download PDF',  sub: 'Print-ready document' },
+              { format: 'xlsx', icon: '📊', label: 'Download Excel (.xlsx)', sub: 'Full detail — all fields' },
+              { format: 'pdf',  icon: '📄', label: 'Download PDF',           sub: 'Print-ready document' },
             ].map(({ format, icon, label, sub }) => (
               <button key={format}
                 onClick={() => { onExport(format); setOpen(false); }}
@@ -274,7 +274,9 @@ export default function Customers() {
       if (endDate)    params.endDate   = endDate;
       if (search)     params.search    = search;
       const res = await axios.get('/api/customers/export', { params, responseType: 'blob' });
-      const mime = format === 'pdf' ? 'application/pdf' : 'text/csv';
+      const mime = format === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       const url  = URL.createObjectURL(new Blob([res.data], { type: mime }));
       Object.assign(document.createElement('a'), { href: url, download: `customers.${format}` }).click();
       URL.revokeObjectURL(url);

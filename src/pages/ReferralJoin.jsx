@@ -127,6 +127,33 @@ export default function ReferralJoin() {
             </div>
           </div>
 
+          {/* Referral Code — auto-filled from ?ref= URL param, read-only */}
+          <div>
+            <label style={labelStyle}>Referral Code</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                value={`ref${whomReferNumber}`}
+                readOnly
+                style={{
+                  ...inputStyle,
+                  background: '#f0fdf4',
+                  color: '#008060',
+                  fontWeight: 700,
+                  border: '1.5px solid #008060',
+                  paddingRight: 36,
+                  letterSpacing: 1,
+                }}
+              />
+              <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}>
+                ✅
+              </span>
+            </div>
+            <p style={{ fontSize: 12, color: '#008060', marginTop: 4, fontWeight: 500 }}>
+              Referral code applied automatically.
+            </p>
+          </div>
+
           <button
             type="submit"
             disabled={loading}
