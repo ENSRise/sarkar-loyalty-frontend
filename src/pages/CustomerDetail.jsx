@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -174,19 +174,26 @@ function MembershipCard({ customer, cfg, benefits }) {
   );
 }
 
+const COUPON_STATUS_STYLE = {
+  Used:        { bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.3)',  color: '#34d399', bar: '#22c55e' },
+  Unused:      { bg: 'rgba(250,204,21,0.12)', border: 'rgba(250,204,21,0.3)', color: '#fbbf24', bar: '#eab308' },
+  PartialUsed: { bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.3)', color: '#60a5fa', bar: '#3b82f6' },
+  Pending:     { bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.2)',color: '#94a3b8', bar: '#64748b' },
+};
+
 /* ── Referral card ───────────────────────────────────────────── */
 function ReferralCard({ item, index }) {
-  const [copied, setCopied] = useState(false);
   const initials = (item.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
   const hue = [...(item.name || 'A')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 
-  const copy = useCallback(() => {
-    if (!item.couponCode) return;
-    navigator.clipboard.writeText(item.couponCode).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  }, [item.couponCode]);
+  const tierAmt   = parseFloat(item.tierAmount || 0);
+  const remaining = item['remaining-amount'] !== undefined
+    ? parseFloat(item['remaining-amount'])
+    : tierAmt;
+  const consumed  = Math.max(0, tierAmt - remaining);
+  const pct       = tierAmt > 0 ? Math.min(100, Math.round((consumed / tierAmt) * 100)) : 0;
+  const status    = item['coupon-status'] || (item.couponCode ? 'Unused' : 'Pending');
+  const ss        = COUPON_STATUS_STYLE[status] || COUPON_STATUS_STYLE.Pending;
 
   return (
     <div style={{
@@ -200,12 +207,10 @@ function ReferralCard({ item, index }) {
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.28)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.18)'; }}
     >
-      {/* Index number watermark */}
-      <div style={{
-        position: 'absolute', top: 12, right: 16,
-        fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.08)',
-        letterSpacing: 2,
-      }}>#{String(index + 1).padStart(2, '0')}</div>
+      {/* Index watermark */}
+      <div style={{ position: 'absolute', top: 12, right: 16, fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.08)', letterSpacing: 2 }}>
+        #{String(index + 1).padStart(2, '0')}
+      </div>
 
       {/* Glow blob */}
       <div style={{
@@ -215,7 +220,7 @@ function ReferralCard({ item, index }) {
         pointerEvents: 'none',
       }} />
 
-      {/* Top: avatar + name */}
+      {/* Top: avatar + name + status badge */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <div style={{
           width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
@@ -226,60 +231,76 @@ function ReferralCard({ item, index }) {
         }}>
           {initials}
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>{item.name || '—'}</div>
           <div style={{ fontSize: 12, color: '#64748b', marginTop: 1, fontFamily: 'monospace' }}>
             +91 {item.phonenumber || '—'}
           </div>
         </div>
+        {/* Status badge */}
+        <span style={{
+          flexShrink: 0, background: ss.bg, border: `1px solid ${ss.border}`,
+          borderRadius: 20, padding: '3px 9px', fontSize: 10, fontWeight: 700,
+          color: ss.color, letterSpacing: '0.03em', whiteSpace: 'nowrap',
+        }}>
+          {status}
+        </span>
       </div>
 
       {/* Divider */}
       <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', marginBottom: 14 }} />
 
-      {/* Customer ID */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-          Customer ID
+      {/* Tier Amount + Remaining Amount */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 9, padding: '10px 12px',
+        }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+            Tier Amount
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', letterSpacing: '-0.5px' }}>
+            ₹{tierAmt > 0 ? tierAmt.toLocaleString('en-IN') : '—'}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'monospace' }}>
-          {item.customer_id || '—'}
+        <div style={{
+          background: `${ss.bg}`, border: `1px solid ${ss.border}`,
+          borderRadius: 9, padding: '10px 12px',
+        }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+            Remaining
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: ss.color, letterSpacing: '-0.5px' }}>
+            {tierAmt > 0 ? `₹${remaining.toLocaleString('en-IN')}` : '—'}
+          </div>
         </div>
       </div>
 
-      {/* Coupon code */}
-      <div>
-        <div style={{ fontSize: 9, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
-          Coupon Code
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 7, flex: 1,
-            background: 'rgba(0,128,96,0.12)', border: '1px solid rgba(0,128,96,0.25)',
-            borderRadius: 8, padding: '7px 12px',
-          }}>
-            <span style={{ fontSize: 13 }}>🎫</span>
-            <span style={{
-              fontSize: 13, fontWeight: 800, color: '#34d399',
-              fontFamily: 'monospace', letterSpacing: 1.5,
-            }}>
-              {item.couponCode || '—'}
+      {/* Progress bar */}
+      {tierAmt > 0 && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+              Settlement Used
+            </span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: ss.color }}>
+              {pct}%
             </span>
           </div>
-          {item.couponCode && (
-            <button onClick={copy} style={{
-              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              background: copied ? 'rgba(0,128,96,0.25)' : 'rgba(255,255,255,0.06)',
-              border: `1px solid ${copied ? 'rgba(0,128,96,0.4)' : 'rgba(255,255,255,0.1)'}`,
-              color: copied ? '#34d399' : '#64748b',
-              cursor: 'pointer', fontSize: 14, transition: 'all 0.15s',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              {copied ? '✓' : '⎘'}
-            </button>
-          )}
+          <div style={{ height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{
+              width: `${pct}%`, height: '100%',
+              background: ss.bar,
+              borderRadius: 99,
+              transition: 'width 0.5s ease',
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+            <span style={{ fontSize: 10, color: '#475569' }}>₹{consumed} used</span>
+            <span style={{ fontSize: 10, color: '#475569' }}>₹{remaining} left</span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -329,7 +350,9 @@ export default function CustomerDetail() {
 
   const referralParts  = customer.customerReferralPart || [];
   const referralCount  = customer.referralCount || 0;
-  const walletBalance  = parseFloat(customer.wallet || 0);
+  const walletBalance  = referralParts
+    .filter(e => e.couponCode)
+    .reduce((sum, e) => sum + parseFloat(e.tierAmount || 0), 0);
 
   const tabs = [
     { id: 'transactions', label: `Transactions (${orders?.length || 0})` },

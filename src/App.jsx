@@ -17,8 +17,9 @@ import JoinLoyalty    from './pages/JoinLoyalty.jsx';
 import ScanScanner    from './pages/ScanScanner.jsx';
 import ReferralPage   from './pages/ReferralPage.jsx';
 import ReferralJoin   from './pages/ReferralJoin.jsx';
-import ReferralStats    from './pages/ReferralStats.jsx';
-import GeneralSettings  from './pages/GeneralSettings.jsx';
+import ReferralStats      from './pages/ReferralStats.jsx';
+import GeneralSettings    from './pages/GeneralSettings.jsx';
+import AmountSettlement   from './pages/AmountSettlement.jsx';
 
 export default function App() {
   return (
@@ -47,8 +48,9 @@ export default function App() {
             <Route path="/join-loyalty" element={<ProtectedRoute permission="join_loyalty"><JoinLoyalty /></ProtectedRoute>} />
             <Route path="/scan-scanner" element={<ProtectedRoute permission="scan_loyalty"><ScanScanner /></ProtectedRoute>} />
             <Route path="/referral"       element={<ProtectedRoute permission="referral"><ReferralPage /></ProtectedRoute>} />
-            <Route path="/referral-stats"    element={<ReferralStats />} />
-            <Route path="/general-settings"  element={<ProtectedRoute permission="general_settings"><GeneralSettings /></ProtectedRoute>} />
+            <Route path="/referral-stats"      element={<ReferralStats />} />
+            <Route path="/amount-settlement"  element={<AmountSettlement />} />
+            <Route path="/general-settings"   element={<ProtectedRoute permission="general_settings"><GeneralSettings /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

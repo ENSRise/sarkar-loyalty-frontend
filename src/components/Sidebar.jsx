@@ -12,10 +12,11 @@ const NAV_ITEMS = [
 ];
 
 const SUPER_ADMIN_NAV = [
-  { to: '/join-loyalty',      icon: '🎯', label: 'Join Loyalty' },
-  { to: '/scan-scanner',      icon: '📷', label: 'Scan Scanner' },
-  { to: '/referral',          icon: '🎁', label: 'Referral' },
-  { to: '/general-settings',  icon: '⚙️', label: 'General Settings' },
+  { to: '/join-loyalty',       icon: '🎯', label: 'Join Loyalty' },
+  { to: '/scan-scanner',       icon: '📷', label: 'Scan Scanner' },
+  { to: '/referral',           icon: '🎁', label: 'Referral' },
+  { to: '/amount-settlement',  icon: '💳', label: 'Amount Settlement' },
+  { to: '/general-settings',   icon: '⚙️', label: 'General Settings' },
 ];
 
 const ROLE_META = {
