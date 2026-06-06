@@ -9,6 +9,11 @@ export default defineConfig({
       '/api': {
         target: 'https://sarkar-backend.ensrise.xyz',
         changeOrigin: true,
+        secure: false,  // Allow self-signed or mixed SSL
+        rewrite: (path) => path.replace(/^\/api/, '/api'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
       },
     },
   },
