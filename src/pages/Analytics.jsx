@@ -7,7 +7,7 @@ import {
   ComposedChart, ReferenceLine,
 } from 'recharts';
 
-const SHOP = 'loyalty-rgck8aw4.myshopify.com';
+const SHOP = 'checkout-store-q29whnkf.myshopify.com';
 
 /* ── Colours ─────────────────────────────────────────────────── */
 const C = { Hold: '#f59e0b', Cancel: '#ef4444', Credit: '#22c55e', Total: '#5c6ac4' };

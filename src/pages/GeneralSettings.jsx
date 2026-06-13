@@ -138,7 +138,7 @@ export default function GeneralSettings() {
 
       {/* Shopify Integration */}
       <SettingCard title="Shopify Integration" icon="🛍️">
-        <Field label="Shop Name" hint="Your myshopify.com store handle (e.g. loyalty-rgck8aw4.myshopify.com)">
+        <Field label="Shop Name" hint="Your myshopify.com store handle (e.g. checkout-store-q29whnkf.myshopify.com)">
           <input
             value={form.shopName}
             onChange={e => set('shopName', e.target.value)}

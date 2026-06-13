@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
-const SHOP = 'loyalty-rgck8aw4.myshopify.com';
+const SHOP = 'checkout-store-q29whnkf.myshopify.com';
 
 /* ── Tier visual config ───────────────────────────────────────── */
 const TIER_CONFIG = {
