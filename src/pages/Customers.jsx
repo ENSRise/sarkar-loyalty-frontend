@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import DateRangePicker from '../components/DateRangePicker';
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 const fmtShort = (d) =>
@@ -111,104 +112,6 @@ const ExportDropdown = ({ onExport, exporting }) => {
   );
 };
 
-/* ── Date Range Popover ──────────────────────────────────────────── */
-const DateRangeFilter = ({ appliedStart, appliedEnd, onApply }) => {
-  const [open,  setOpen]  = useState(false);
-  const [start, setStart] = useState(appliedStart);
-  const [end,   setEnd]   = useState(appliedEnd);
-  const ref = useRef(null);
-
-  useEffect(() => { setStart(appliedStart); setEnd(appliedEnd); }, [appliedStart, appliedEnd]);
-
-  useEffect(() => {
-    if (!open) return;
-    const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', fn);
-    return () => document.removeEventListener('mousedown', fn);
-  }, [open]);
-
-  const isActive   = appliedStart || appliedEnd;
-  const handleApply = () => { onApply(start, end); setOpen(false); };
-  const handleClear = () => { setStart(''); setEnd(''); onApply('', ''); setOpen(false); };
-
-  const label = isActive
-    ? [fmtShort(appliedStart), fmtShort(appliedEnd)].filter(Boolean).join(' – ')
-    : 'Date Range';
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: '6px',
-          height: '36px', padding: '0 12px',
-          background: isActive ? 'var(--primary-light)' : open ? '#f1f5f9' : 'white',
-          border: `1.5px solid ${isActive ? 'var(--primary)' : open ? '#c5cfe8' : 'var(--border)'}`,
-          borderRadius: '8px', cursor: 'pointer',
-          fontSize: '13px', fontWeight: 600,
-          color: isActive ? 'var(--primary)' : 'var(--text)',
-          transition: 'all 0.15s', whiteSpace: 'nowrap',
-          boxShadow: open && !isActive ? '0 0 0 3px rgba(92,106,196,0.1)' : 'none',
-        }}>
-        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8"  y1="2" x2="8"  y2="6" />
-          <line x1="3"  y1="10" x2="21" y2="10" />
-        </svg>
-        {label}
-        {isActive ? (
-          <span
-            onClick={e => { e.stopPropagation(); handleClear(); }}
-            style={{ marginLeft: '1px', opacity: 0.55, fontSize: '15px', lineHeight: 1, fontWeight: 400 }}>
-            ×
-          </span>
-        ) : (
-          <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ opacity: 0.4, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'absolute', left: 0, top: 'calc(100% + 8px)',
-          background: 'white', border: '1px solid var(--border)',
-          borderRadius: '12px', boxShadow: 'var(--shadow-lg)',
-          padding: '16px 16px 14px', zIndex: 300, minWidth: '300px',
-          animation: 'fadeSlideUp 0.12s ease',
-        }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '12px' }}>
-            Filter by date
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-            {[
-              { label: 'From', val: start, set: setStart, max: end   || undefined, min: undefined },
-              { label: 'To',   val: end,   set: setEnd,   min: start || undefined, max: undefined },
-            ].map(({ label, val, set, min, max }) => (
-              <div key={label}>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '5px' }}>{label}</label>
-                <input type="date" value={val} min={min} max={max}
-                  onChange={e => set(e.target.value)}
-                  className="form-input" style={{ fontSize: '13px', padding: '8px 10px' }} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
-            <button onClick={handleClear}
-              style={{ padding: '7px 14px', border: '1px solid var(--border)', borderRadius: '7px', background: 'white', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-              Clear
-            </button>
-            <button onClick={handleApply}
-              style={{ padding: '7px 16px', border: 'none', borderRadius: '7px', background: 'var(--primary)', color: 'white', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
-              Apply Filter
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 /* ── Pagination button ───────────────────────────────────────────── */
 const PagBtn = ({ label, onClick, disabled, active }) => (
@@ -237,11 +140,12 @@ export default function Customers() {
   const [loading,   setLoading]   = useState(true);
   const [exporting, setExporting] = useState('');
 
-  const [search,    setSearch]    = useState('');
-  const [tierFilter,setTier]      = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate,   setEndDate]   = useState('');
-  const [page,      setPage]      = useState(1);
+  const [search,      setSearch]      = useState('');
+  const [tierFilter,  setTier]        = useState('');
+  const [startDate,   setStartDate]   = useState('');
+  const [endDate,     setEndDate]     = useState('');
+  const [activePreset,setActivePreset]= useState('');
+  const [page,        setPage]        = useState(1);
 
   /* ── Fetch ── */
   const fetchCustomers = useCallback(async () => {
@@ -261,8 +165,8 @@ export default function Customers() {
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
 
-  const handle  = (setter) => (val) => { setter(val); setPage(1); };
-  const handleDate = (s, e) => { setStartDate(s); setEndDate(e); setPage(1); };
+  const handle     = (setter) => (val) => { setter(val); setPage(1); };
+  const handleDate = (s, e, preset = '') => { setStartDate(s); setEndDate(e); setActivePreset(preset); setPage(1); };
 
   /* ── Export ── */
   const exportData = async (format) => {
@@ -284,7 +188,7 @@ export default function Customers() {
     setExporting('');
   };
 
-  const hasFilter = search || tierFilter || startDate || endDate;
+  const hasFilter = search || tierFilter || startDate || endDate || activePreset;
 
   /* ── Render ── */
   return (
@@ -342,12 +246,17 @@ export default function Customers() {
             />
           </div>
 
-          {/* Date range */}
-          <DateRangeFilter appliedStart={startDate} appliedEnd={endDate} onApply={handleDate} />
+          {/* Date range filter */}
+          <DateRangePicker
+            activePreset={activePreset}
+            appliedStart={startDate}
+            appliedEnd={endDate}
+            onApply={handleDate}
+          />
 
           {/* Clear all */}
           {hasFilter && (
-            <button onClick={() => { handle(setSearch)(''); handle(setTier)(''); handleDate('', ''); }}
+            <button onClick={() => { handle(setSearch)(''); handle(setTier)(''); handleDate('', '', ''); }}
               style={{ height: '36px', padding: '0 12px', border: '1px solid var(--border)', borderRadius: '8px', background: 'white', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
               Clear all
             </button>
