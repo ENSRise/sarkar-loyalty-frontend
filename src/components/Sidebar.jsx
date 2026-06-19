@@ -8,7 +8,8 @@ const NAV_ITEMS = [
   { to: '/customers',       icon: '👥', label: 'Customers',        permission: 'customers' },
   { to: '/tier-settings',   icon: '⚙️', label: 'Tier Settings',    permission: 'tier_settings' },
   { to: '/role-management', icon: '🔑', label: 'Role Management',  permission: 'role_management' },
-  { to: '/referral-stats',  icon: '🎁', label: 'Referrals',  permission: 'referral_stats' },
+  { to: '/referral-stats',        icon: '🎁', label: 'Referrals',            permission: 'referral_stats' },
+  { to: '/interested-customers',  icon: '🎯', label: 'Abandoned Customers', permission: 'interested_customers' },
 ];
 
 const SUPER_ADMIN_NAV = [
@@ -16,6 +17,7 @@ const SUPER_ADMIN_NAV = [
   { to: '/scan-scanner',       icon: '📷', label: 'Scan Scanner' },
   { to: '/referral',           icon: '🎁', label: 'Referral' },
   { to: '/amount-settlement',  icon: '💳', label: 'Amount Settlement' },
+  { to: '/customer-bonus',     icon: '🎉', label: 'Customer Bonus' },
   { to: '/general-settings',   icon: '⚙️', label: 'General Settings' },
 ];
 

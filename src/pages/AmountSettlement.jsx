@@ -50,7 +50,7 @@ export default function AmountSettlement() {
       const { data } = await axios.get(`/api/settlement/status?phone=${encodeURIComponent(phone.trim())}`);
       setStatus(data.data);
     } catch (err) {
-      setError(err.response?.data?.message || 'Customer not found');
+      setError(err.response?.data?.error || err.response?.data?.message || 'Customer not found');
     } finally {
       setLookingUp(false);
     }
@@ -71,11 +71,7 @@ export default function AmountSettlement() {
       setStatus(null); // refresh status after settle
     } catch (err) {
       const errData = err.response?.data;
-      setError(errData?.message || 'Settlement failed');
-      // If a coupon already exists, show it
-      if (errData?.error?.coupon) {
-        setResult({ existingCoupon: errData.error });
-      }
+      setError(errData?.error || errData?.message || 'Settlement failed');
     } finally {
       setLoading(false);
     }
@@ -131,21 +127,34 @@ export default function AmountSettlement() {
               Settlement Amount
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
-              {AMOUNTS.map(a => (
-                <button
-                  key={a}
-                  onClick={() => setAmount(String(a))}
-                  style={{
-                    flex: 1, padding: '10px 0', borderRadius: 9, fontSize: 15, fontWeight: 700,
-                    border: `2px solid ${amount === String(a) ? 'var(--primary)' : 'var(--border)'}`,
-                    background: amount === String(a) ? 'var(--primary)' : 'white',
-                    color: amount === String(a) ? 'white' : 'var(--text)',
-                    cursor: 'pointer', transition: 'all 0.15s',
-                  }}>
-                  ₹{a}
-                </button>
-              ))}
+              {AMOUNTS.map(a => {
+                const balance     = status ? parseFloat(status.totalAvailableBalance || 0) : null;
+                const insufficient = balance !== null && a > balance;
+                return (
+                  <button
+                    key={a}
+                    onClick={() => !insufficient && setAmount(String(a))}
+                    disabled={insufficient}
+                    title={insufficient ? `Only ₹${balance} available` : ''}
+                    style={{
+                      flex: 1, padding: '10px 0', borderRadius: 9, fontSize: 15, fontWeight: 700,
+                      border: `2px solid ${amount === String(a) ? 'var(--primary)' : 'var(--border)'}`,
+                      background: amount === String(a) ? 'var(--primary)' : insufficient ? '#f8fafc' : 'white',
+                      color: amount === String(a) ? 'white' : insufficient ? '#cbd5e1' : 'var(--text)',
+                      cursor: insufficient ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+                      opacity: insufficient ? 0.6 : 1,
+                    }}>
+                    ₹{a}
+                  </button>
+                );
+              })}
             </div>
+            {status && (
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>
+                Available balance: <strong>₹{parseFloat(status.totalAvailableBalance || 0).toLocaleString('en-IN')}</strong>
+                {' '}— settlements can be repeated until the full balance is used.
+              </div>
+            )}
           </div>
 
           {/* Error */}
@@ -215,21 +224,19 @@ export default function AmountSettlement() {
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', borderRadius: 9, padding: '12px 14px' }}>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Final Coupon</div>
-                  {status.finalCoupon.code ? (
-                    <>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 3, fontFamily: 'monospace' }}>
-                        {status.finalCoupon.code}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                        ₹{status.finalCoupon.value} · {status.finalCoupon.used ? '✅ Used' : '⏳ Unused'}
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>None yet</div>
-                  )}
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Coupons Issued</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#1e293b', marginTop: 3 }}>
+                    {status.settlementHistory?.length || 0}
+                  </div>
                 </div>
               </div>
+
+              {/* Settlement history — every coupon ever generated for this customer */}
+              {status.settlementHistory?.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <SettlementHistory history={status.settlementHistory} />
+                </div>
+              )}
 
               {/* Referral breakdown */}
               {status.referralPart?.length > 0 && (
@@ -239,7 +246,7 @@ export default function AmountSettlement() {
           )}
 
           {/* Settlement result */}
-          {result && !result.existingCoupon && (
+          {result && (
             <div style={{
               background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 14, padding: 22,
             }}>
@@ -268,22 +275,49 @@ export default function AmountSettlement() {
                 </div>
               </div>
 
+              {result.remainingBalance !== undefined && (
+                <div style={{ fontSize: 12, color: '#166534', marginBottom: 14, textAlign: 'center' }}>
+                  Remaining wallet balance: <strong>₹{parseFloat(result.remainingBalance).toLocaleString('en-IN')}</strong>
+                  {result.remainingBalance > 0 && ' — another settlement can be generated for this customer.'}
+                </div>
+              )}
+
               <ReferralBreakdown parts={result.updatedReferralPart} title="Updated Referral Breakdown" />
             </div>
           )}
-
-          {/* Existing coupon error detail */}
-          {result?.existingCoupon && (
-            <div style={{ background: '#fef9c3', border: '1px solid #fde047', borderRadius: 14, padding: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#854d0e', marginBottom: 8 }}>⚠️ Existing Coupon Found</div>
-              <div style={{ fontSize: 13, color: '#78350f' }}>
-                <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{result.existingCoupon.coupon}</span>
-                &nbsp;·&nbsp;₹{result.existingCoupon.value}
-                &nbsp;·&nbsp;{result.existingCoupon.usedInOrder ? 'Already used in an order' : 'Not yet used'}
-              </div>
-            </div>
-          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Settlement history list ─────────────────────────────────────── */
+function SettlementHistory({ history }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+        Settlement History
+      </div>
+      <div style={{ borderRadius: 9, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+        {history.map((h, i) => (
+          <div key={h.couponCode} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px',
+            background: i % 2 === 0 ? 'white' : '#f8fafc',
+            borderBottom: i < history.length - 1 ? '1px solid #f1f5f9' : 'none',
+          }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', fontFamily: 'monospace' }}>{h.couponCode}</span>
+              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 8 }}>
+                {new Date(h.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <StatusBadge status={h.used ? 'Used' : 'Unused'} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>₹{h.couponValue}</span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
@@ -24,6 +24,41 @@ export default function Register() {
   const [status, setStatus]   = useState('idle'); // idle | loading | success | error
   const [result, setResult]   = useState(null);
   const [apiError, setApiError] = useState('');
+
+  // Silent interest capture — fires once when firstName+lastName+phone+(birthday or anniversary) are all filled
+  const capturedRef   = useRef(false);
+  const captureTimer  = useRef(null);
+
+  useEffect(() => {
+    if (status === 'success' || status === 'loading') return;
+    if (capturedRef.current) return;
+
+    const digits        = form.phone.replace(/\D/g, '');
+    const hasRequired   = form.firstName.trim() && form.lastName.trim() && digits.length === 10;
+    const hasDate       = form.birthdayDate || form.anniversaryDate;
+
+    if (!hasRequired || !hasDate) return;
+
+    clearTimeout(captureTimer.current);
+    captureTimer.current = setTimeout(async () => {
+      if (capturedRef.current) return;
+      try {
+        await axios.post(`${API}/api/interested-customers/capture`, {
+          firstName:       form.firstName,
+          lastName:        form.lastName,
+          email:           form.email,
+          phone:           form.phone,
+          birthdayDate:    form.birthdayDate,
+          anniversaryDate: form.anniversaryDate,
+        });
+        capturedRef.current = true;
+      } catch (_) {
+        // Silent — never affect user experience
+      }
+    }, 1500);
+
+    return () => clearTimeout(captureTimer.current);
+  }, [form, status]);
 
   // Auto-fill referral code from ?ref= URL param
   useEffect(() => {

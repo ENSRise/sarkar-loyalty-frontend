@@ -42,7 +42,7 @@ export function AuthProvider({ children }) {
     if (!user) return false;
     if (user.role === 'super_admin') return true;
     // role_management, scan_loyalty, join_loyalty are super_admin exclusive
-    if (['role_management', 'scan_loyalty', 'join_loyalty'].includes(page)) return false;
+    if (['role_management', 'scan_loyalty', 'join_loyalty', 'customer_bonus'].includes(page)) return false;
     return !!(user.permissions?.[page]?.[action]);
   };
 

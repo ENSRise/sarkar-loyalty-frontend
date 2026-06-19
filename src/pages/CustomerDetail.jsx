@@ -458,6 +458,7 @@ export default function CustomerDetail() {
                       <th>Amount</th>
                       <th>Tax</th>
                       <th>Discount</th>
+                      <th>Coupon</th>
                       <th>Status</th>
                       <th>Credit Day</th>
                     </tr>
@@ -484,6 +485,22 @@ export default function CustomerDetail() {
                             {parseFloat(order.totalDiscounts || 0) > 0
                               ? `−₹${parseFloat(order.totalDiscounts).toLocaleString('en-IN')}`
                               : '—'}
+                          </td>
+                          <td>
+                            {order.couponCode ? (
+                              <div>
+                                <span style={{
+                                  display: 'inline-block', fontFamily: 'monospace', fontSize: 11, fontWeight: 700,
+                                  background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0',
+                                  borderRadius: 6, padding: '2px 7px', letterSpacing: 0.3,
+                                }}>{order.couponCode}</span>
+                                {parseFloat(order.couponAmount || 0) > 0 && (
+                                  <div style={{ fontSize: 11, color: '#16a34a', fontWeight: 600, marginTop: 3 }}>
+                                    −₹{parseFloat(order.couponAmount).toLocaleString('en-IN')}
+                                  </div>
+                                )}
+                              </div>
+                            ) : <span style={{ color: '#cbd5e1' }}>—</span>}
                           </td>
                           <td>
                             <span style={{

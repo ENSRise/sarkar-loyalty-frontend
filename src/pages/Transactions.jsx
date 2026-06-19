@@ -163,6 +163,9 @@ const OrderModal = ({ order, onClose }) => {
               <ModalInfo label="Total Price"   value={`₹${parseFloat(order.totalPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} strong />
               <ModalInfo label="Tax"           value={`₹${order.totalTax}`} />
               <ModalInfo label="Discounts"     value={`₹${order.totalDiscounts}`} />
+              {order.couponCode && (
+                <ModalInfo label="Coupon Used" value={`${order.couponCode} (−₹${parseFloat(order.couponAmount || 0).toLocaleString('en-IN')})`} strong />
+              )}
               <ModalInfo label="Return Window" value={`${order.returnWindow} days`} />
               <ModalInfo label="Credit Day"    value={order.creditDay || '—'} />
               <ModalInfo label="Created"       value={fmtFull(order.createdAt)} />
@@ -407,7 +410,11 @@ export default function Transactions() {
                     </td>
                     <td>
                       <div style={{ fontWeight: 700, fontSize: '13px' }}>₹{parseFloat(o.totalPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                      {parseFloat(o.totalDiscounts) > 0 && (
+                      {o.couponCode ? (
+                        <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600, marginTop: '1px', fontFamily: 'monospace' }}>
+                          {o.couponCode} −₹{o.couponAmount}
+                        </div>
+                      ) : parseFloat(o.totalDiscounts) > 0 && (
                         <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600, marginTop: '1px' }}>−₹{o.totalDiscounts} off</div>
                       )}
                     </td>
