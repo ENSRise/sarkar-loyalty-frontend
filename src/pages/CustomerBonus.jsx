@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const QUICK_POINTS = [50, 100, 200, 500];
+const MAX_BULK_ROWS = 1000;
 
 const TIER_BADGE = {
   silver:   { icon: '🥈', color: '#4a5568', bg: '#f1f5f9' },
@@ -10,9 +11,67 @@ const TIER_BADGE = {
   platinum: { icon: '💎', color: '#5b21b6', bg: '#ede9fe' },
 };
 
+/* ── CSV parsing (client-side, no library needed for 2 plain columns) ── */
+const splitCsvLine = (line) => line.split(',').map(cell => cell.trim().replace(/^"(.*)"$/, '$1'));
+
+const parseCsvText = (text) => {
+  const cleaned = String(text).replace(/^﻿/, ''); // strip BOM if present
+  const lines = cleaned.split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
+
+  const header  = splitCsvLine(lines[0]).map(h => h.toLowerCase());
+  const idIdx     = header.findIndex(h => h.includes('email') || h.includes('phone'));
+  const pointsIdx = header.findIndex(h => h.includes('point') || h.includes('bonus') || h.includes('amount'));
+
+  if (idIdx === -1 || pointsIdx === -1) {
+    throw new Error('Header must include a phone/email column and a bonus points column — download the sample for the exact format');
+  }
+
+  const rows = lines.slice(1)
+    .map(line => {
+      const cells = splitCsvLine(line);
+      return { identifier: cells[idIdx] || '', points: cells[pointsIdx] || '' };
+    })
+    .filter(r => r.identifier || r.points);
+
+  return rows;
+};
+
+const downloadSampleCsv = () => {
+  const sample = [
+    ['Phone or Email', 'Bonus Points'],
+    ['9876543210', '100'],
+    ['customer@example.com', '150'],
+    ['9988776655', '200'],
+  ].map(row => row.join(',')).join('\n');
+
+  const blob = new Blob([sample], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'customer_bonus_sample.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+function StatTile({ label, value, color, bg }) {
+  return (
+    <div style={{ background: bg, borderRadius: 12, padding: '14px 16px', textAlign: 'center' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 900, color, marginTop: 4 }}>{value}</div>
+    </div>
+  );
+}
+
 export default function CustomerBonus() {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
+  const [tab, setTab] = useState('single'); // 'single' | 'bulk'
+
+  /* ── Single-customer state (unchanged behavior) ───────────────────── */
   const [query, setQuery]   = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -26,6 +85,13 @@ export default function CustomerBonus() {
   const [granting, setGranting] = useState(false);
   const [formError, setFormError]     = useState('');
   const [result, setResult] = useState(null);
+
+  /* ── Bulk upload state ─────────────────────────────────────────────── */
+  const [bulkFile, setBulkFile]   = useState(null);
+  const [bulkRows, setBulkRows]   = useState([]);
+  const [bulkError, setBulkError] = useState('');
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
 
   const loadHistory = async (shopifyCustomerId) => {
     setLoadingHistory(true);
@@ -106,6 +172,71 @@ export default function CustomerBonus() {
     }
   };
 
+  /* ── Bulk upload handlers ──────────────────────────────────────────── */
+  const ingestFile = (file) => {
+    setBulkResult(null);
+    setBulkError('');
+    setBulkRows([]);
+    setBulkFile(null);
+
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setBulkError('Please select a .csv file');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setBulkError('File is too large (max 2MB)');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const rows = parseCsvText(ev.target.result);
+        if (rows.length === 0) throw new Error('No data rows found in the CSV');
+        if (rows.length > MAX_BULK_ROWS) {
+          throw new Error(`This file has ${rows.length} rows — maximum is ${MAX_BULK_ROWS} per upload`);
+        }
+        setBulkFile(file);
+        setBulkRows(rows);
+      } catch (err) {
+        setBulkError(err.message);
+      }
+    };
+    reader.onerror = () => setBulkError('Failed to read file');
+    reader.readAsText(file);
+  };
+
+  const handleFileInputChange = (e) => ingestFile(e.target.files?.[0]);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    ingestFile(e.dataTransfer.files?.[0]);
+  };
+
+  const clearBulkFile = () => {
+    setBulkFile(null);
+    setBulkRows([]);
+    setBulkResult(null);
+    setBulkError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleBulkUpload = async () => {
+    if (!bulkRows.length) return;
+    setBulkUploading(true);
+    setBulkError('');
+    setBulkResult(null);
+    try {
+      const r = await axios.post('/api/customer-bonus/bulk-grant', { rows: bulkRows });
+      setBulkResult(r.data.data);
+    } catch (err) {
+      setBulkError(err.response?.data?.message || 'Bulk upload failed');
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   const tierBadge = TIER_BADGE[customer?.currentTier] || TIER_BADGE.silver;
 
   return (
@@ -115,272 +246,448 @@ export default function CustomerBonus() {
         <p className="page-subtitle">Look up a customer and grant referral-style bonus points or leave an internal note</p>
       </div>
 
-      {/* ── Hero search bar ── */}
-      <form onSubmit={handleSearch} style={{
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        borderRadius: 16, padding: '26px 28px', marginBottom: 24,
-        boxShadow: '0 8px 30px rgba(15,23,42,0.18)',
-        border: '1px solid rgba(255,255,255,0.06)',
-      }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
-          Find a customer
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 15, opacity: 0.5 }}>🔍</span>
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Phone number or email…"
-              style={{
-                width: '100%', padding: '13px 14px 13px 38px', borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)',
-                color: 'white', fontSize: 14, outline: 'none',
-              }}
-            />
-          </div>
-          <button type="submit" disabled={searching} style={{
-            padding: '0 26px', borderRadius: 10, border: 'none',
-            background: searching ? 'rgba(0,128,96,0.5)' : '#008060',
-            color: 'white', fontWeight: 700, fontSize: 14, cursor: searching ? 'default' : 'pointer',
-            whiteSpace: 'nowrap', transition: 'background 0.15s',
-          }}>
-            {searching ? 'Searching…' : 'Find Customer'}
-          </button>
-        </div>
-        {searchError && (
-          <div style={{
-            marginTop: 12, fontSize: 12, color: '#fca5a5', fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            <span>⚠️</span> {searchError}
-          </div>
-        )}
-      </form>
-
-      {!customer && !searching && (
-        <div style={{
-          background: '#f8fafc', border: '1px dashed #e2e8f0', borderRadius: 14,
-          padding: '52px 24px', textAlign: 'center',
+      {/* ── Tab switcher ── */}
+      <div style={{ display: 'inline-flex', gap: 6, marginBottom: 24, background: '#f1f5f9', borderRadius: 12, padding: 4 }}>
+        <button type="button" onClick={() => setTab('single')} style={{
+          padding: '9px 18px', borderRadius: 9, border: 'none',
+          background: tab === 'single' ? '#008060' : 'transparent',
+          color: tab === 'single' ? 'white' : '#475569',
+          fontWeight: 700, fontSize: 13, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 7, transition: 'all 0.15s',
         }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🔎</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>No customer selected</div>
-          <div style={{ fontSize: 13, color: '#94a3b8' }}>Search by phone or email above to get started.</div>
-        </div>
-      )}
+          👤 Single Customer
+        </button>
+        <button type="button" onClick={() => setTab('bulk')} style={{
+          padding: '9px 18px', borderRadius: 9, border: 'none',
+          background: tab === 'bulk' ? '#008060' : 'transparent',
+          color: tab === 'bulk' ? 'white' : '#475569',
+          fontWeight: 700, fontSize: 13, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 7, transition: 'all 0.15s',
+        }}>
+          📂 Bulk Upload
+        </button>
+      </div>
 
-      {/* ── Customer found: split layout ── */}
-      {customer && (
-        <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'flex-start' }}>
-
-          {/* ── Left: profile + grant form ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-            {/* Profile card */}
-            <div style={{
-              background: 'white', border: '1px solid var(--border)', borderRadius: 14,
-              padding: 20, boxShadow: 'var(--shadow)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                <div style={{
-                  width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
-                  background: 'linear-gradient(135deg,#008060,#006e52)', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 18, fontWeight: 700,
-                }}>
-                  {(customer.firstName || '?').charAt(0).toUpperCase()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{ fontWeight: 700, fontSize: 15, color: '#1e293b', cursor: 'pointer' }}
-                    onClick={() => navigate(`/customers/${customer.shopifyCustomerId}`)}
-                    title="View full profile"
-                  >
-                    {customer.firstName} {customer.lastName}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {customer.phone ? `+${String(customer.phone).replace(/^\+/, '')}` : '—'}
-                  </div>
-                </div>
-                <span style={{
-                  background: tierBadge.bg, color: tierBadge.color,
-                  borderRadius: 20, padding: '4px 11px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
-                }}>
-                  {tierBadge.icon} {customer.currentTier}
-                </span>
-              </div>
-
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                ✉️ {customer.email || '—'}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div style={{ background: '#fffbeb', borderRadius: 9, padding: '12px 14px' }}>
-                  <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Wallet</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#d97706', marginTop: 3 }}>
-                    ₹{parseFloat(customer.walletBalance || 0).toLocaleString('en-IN')}
-                  </div>
-                </div>
-                <div style={{ background: '#eef2ff', borderRadius: 9, padding: '12px 14px' }}>
-                  <div style={{ fontSize: 10, color: '#3730a3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Spent</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#5c6ac4', marginTop: 3 }}>
-                    ₹{parseFloat(customer.totalSpent || 0).toLocaleString('en-IN')}
-                  </div>
-                </div>
-              </div>
+      {/* ════════════════════════ SINGLE CUSTOMER TAB ════════════════════════ */}
+      {tab === 'single' && (
+        <>
+          {/* ── Hero search bar ── */}
+          <form onSubmit={handleSearch} style={{
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            borderRadius: 16, padding: '26px 28px', marginBottom: 24,
+            boxShadow: '0 8px 30px rgba(15,23,42,0.18)',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
+              Find a customer
             </div>
-
-            {/* Grant form */}
-            <form onSubmit={handleGrant} style={{
-              background: 'white', border: '1px solid var(--border)', borderRadius: 14,
-              padding: 20, boxShadow: 'var(--shadow)',
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                🎁 Grant Bonus / Add Note
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 15, opacity: 0.5 }}>🔍</span>
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Phone number or email…"
+                  style={{
+                    width: '100%', padding: '13px 14px 13px 38px', borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)',
+                    color: 'white', fontSize: 14, outline: 'none',
+                  }}
+                />
               </div>
-
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                Quick Points
-              </label>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                {QUICK_POINTS.map(p => (
-                  <button
-                    type="button"
-                    key={p}
-                    onClick={() => setPoints(String(p))}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 700,
-                      border: `2px solid ${points === String(p) ? '#008060' : 'var(--border)'}`,
-                      background: points === String(p) ? '#008060' : 'white',
-                      color: points === String(p) ? 'white' : 'var(--text)',
-                      cursor: 'pointer', transition: 'all 0.15s',
-                    }}>
-                    ₹{p}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Custom Amount (₹)
-                </label>
-                <input type="number" min="1" value={points} onChange={e => setPoints(e.target.value)} placeholder="Enter a custom amount…"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, boxSizing: 'border-box' }} />
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Note
-                </label>
-                <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Reason for this bonus / internal remark…" rows={3}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
-              </div>
-
-              {formError && (
-                <div style={{
-                  background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 9,
-                  padding: '10px 13px', fontSize: 12, color: '#b91c1c', marginBottom: 14,
-                }}>
-                  {formError}
-                </div>
-              )}
-
-              <button type="submit" disabled={granting} style={{
-                width: '100%', padding: '12px 0', borderRadius: 9, border: 'none',
-                background: granting ? 'rgba(22,163,74,0.6)' : '#16a34a',
-                color: 'white', fontWeight: 700, fontSize: 14, cursor: granting ? 'default' : 'pointer',
-                transition: 'background 0.15s',
+              <button type="submit" disabled={searching} style={{
+                padding: '0 26px', borderRadius: 10, border: 'none',
+                background: searching ? 'rgba(0,128,96,0.5)' : '#008060',
+                color: 'white', fontWeight: 700, fontSize: 14, cursor: searching ? 'default' : 'pointer',
+                whiteSpace: 'nowrap', transition: 'background 0.15s',
               }}>
-                {granting ? 'Saving…' : 'Save'}
+                {searching ? 'Searching…' : 'Find Customer'}
               </button>
-            </form>
-          </div>
-
-          {/* ── Right: result + history ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-            {/* Celebration result */}
-            {result && (
+            </div>
+            {searchError && (
               <div style={{
-                background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 14, padding: 22,
+                marginTop: 12, fontSize: 12, color: '#fca5a5', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6,
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: result.points || result.note ? 14 : 0 }}>
-                  <span style={{ fontSize: 28 }}>🎉</span>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 15, color: '#166534' }}>{result.message}</div>
-                    <div style={{ fontSize: 12, color: '#4ade80', marginTop: 2 }}>Saved to {customer.firstName}'s account</div>
-                  </div>
-                </div>
-                {result.points && (
-                  <div style={{
-                    background: 'white', border: '2px dashed #86efac', borderRadius: 12,
-                    padding: '14px 18px', textAlign: 'center', marginBottom: result.note ? 12 : 0,
-                  }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-                      Points Added to Wallet
-                    </div>
-                    <div style={{ fontSize: 26, fontWeight: 900, color: '#008060' }}>₹{result.points}</div>
-                  </div>
-                )}
-                {result.note && (
-                  <div style={{ fontSize: 13, color: '#166534', background: 'white', borderRadius: 9, padding: '10px 14px' }}>
-                    📝 {result.note}
-                  </div>
-                )}
+                <span>⚠️</span> {searchError}
               </div>
             )}
+          </form>
 
-            {/* History */}
-            <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
-              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                📜 Bonus &amp; Note History
-              </div>
-              {loadingHistory ? (
-                <div style={{ padding: 28, textAlign: 'center', color: '#697386', fontSize: 13 }}>Loading…</div>
-              ) : history.length === 0 ? (
-                <div style={{ padding: 28, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>No bonus or note history yet.</div>
-              ) : (
-                <div>
-                  {history.map((h, i) => (
-                    <div key={h.id} style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 12,
-                      padding: '14px 20px',
-                      background: i % 2 === 0 ? 'white' : '#f8fafc',
-                      borderBottom: i < history.length - 1 ? '1px solid #f1f5f9' : 'none',
+          {!customer && !searching && (
+            <div style={{
+              background: '#f8fafc', border: '1px dashed #e2e8f0', borderRadius: 14,
+              padding: '52px 24px', textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🔎</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>No customer selected</div>
+              <div style={{ fontSize: 13, color: '#94a3b8' }}>Search by phone or email above to get started.</div>
+            </div>
+          )}
+
+          {/* ── Customer found: split layout ── */}
+          {customer && (
+            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'flex-start' }}>
+
+              {/* ── Left: profile + grant form ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                {/* Profile card */}
+                <div style={{
+                  background: 'white', border: '1px solid var(--border)', borderRadius: 14,
+                  padding: 20, boxShadow: 'var(--shadow)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                    <div style={{
+                      width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
+                      background: 'linear-gradient(135deg,#008060,#006e52)', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 18, fontWeight: 700,
                     }}>
-                      <div style={{
-                        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                        background: h.points ? '#fef3c7' : '#eef2ff',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
-                      }}>
-                        {h.points ? '🎁' : '📝'}
+                      {(customer.firstName || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{ fontWeight: 700, fontSize: 15, color: '#1e293b', cursor: 'pointer' }}
+                        onClick={() => navigate(`/customers/${customer.shopifyCustomerId}`)}
+                        title="View full profile"
+                      >
+                        {customer.firstName} {customer.lastName}
                       </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                          <span style={{ fontWeight: 700, fontSize: 14, color: h.points ? '#16a34a' : '#94a3b8' }}>
-                            {h.points ? `₹${h.points} bonus` : 'Note'}
-                          </span>
-                          <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                            {new Date(h.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          </span>
-                        </div>
-                        {h.note && (
-                          <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 3 }}>{h.note}</div>
-                        )}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
-                          {h.couponCode && (
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#94a3b8' }}>Ref: {h.couponCode}</span>
-                          )}
-                          {h.grantedBy && (
-                            <span style={{ fontSize: 11, color: '#94a3b8' }}>· by {h.grantedBy}</span>
-                          )}
-                        </div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {customer.phone ? `+${String(customer.phone).replace(/^\+/, '')}` : '—'}
                       </div>
                     </div>
-                  ))}
+                    <span style={{
+                      background: tierBadge.bg, color: tierBadge.color,
+                      borderRadius: 20, padding: '4px 11px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                    }}>
+                      {tierBadge.icon} {customer.currentTier}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    ✉️ {customer.email || '—'}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ background: '#fffbeb', borderRadius: 9, padding: '12px 14px' }}>
+                      <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Wallet</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#d97706', marginTop: 3 }}>
+                        ₹{parseFloat(customer.walletBalance || 0).toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#eef2ff', borderRadius: 9, padding: '12px 14px' }}>
+                      <div style={{ fontSize: 10, color: '#3730a3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Spent</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#5c6ac4', marginTop: 3 }}>
+                        ₹{parseFloat(customer.totalSpent || 0).toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              )}
+
+                {/* Grant form */}
+                <form onSubmit={handleGrant} style={{
+                  background: 'white', border: '1px solid var(--border)', borderRadius: 14,
+                  padding: 20, boxShadow: 'var(--shadow)',
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    🎁 Grant Bonus / Add Note
+                  </div>
+
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    Quick Points
+                  </label>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {QUICK_POINTS.map(p => (
+                      <button
+                        type="button"
+                        key={p}
+                        onClick={() => setPoints(String(p))}
+                        style={{
+                          flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                          border: `2px solid ${points === String(p) ? '#008060' : 'var(--border)'}`,
+                          background: points === String(p) ? '#008060' : 'white',
+                          color: points === String(p) ? 'white' : 'var(--text)',
+                          cursor: 'pointer', transition: 'all 0.15s',
+                        }}>
+                        ₹{p}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      Custom Amount (₹)
+                    </label>
+                    <input type="number" min="1" value={points} onChange={e => setPoints(e.target.value)} placeholder="Enter a custom amount…"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      Note
+                    </label>
+                    <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Reason for this bonus / internal remark…" rows={3}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                  </div>
+
+                  {formError && (
+                    <div style={{
+                      background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 9,
+                      padding: '10px 13px', fontSize: 12, color: '#b91c1c', marginBottom: 14,
+                    }}>
+                      {formError}
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={granting} style={{
+                    width: '100%', padding: '12px 0', borderRadius: 9, border: 'none',
+                    background: granting ? 'rgba(22,163,74,0.6)' : '#16a34a',
+                    color: 'white', fontWeight: 700, fontSize: 14, cursor: granting ? 'default' : 'pointer',
+                    transition: 'background 0.15s',
+                  }}>
+                    {granting ? 'Saving…' : 'Save'}
+                  </button>
+                </form>
+              </div>
+
+              {/* ── Right: result + history ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                {/* Celebration result */}
+                {result && (
+                  <div style={{
+                    background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 14, padding: 22,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: result.points || result.note ? 14 : 0 }}>
+                      <span style={{ fontSize: 28 }}>🎉</span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 15, color: '#166534' }}>{result.message}</div>
+                        <div style={{ fontSize: 12, color: '#4ade80', marginTop: 2 }}>Saved to {customer.firstName}'s account</div>
+                      </div>
+                    </div>
+                    {result.points && (
+                      <div style={{
+                        background: 'white', border: '2px dashed #86efac', borderRadius: 12,
+                        padding: '14px 18px', textAlign: 'center', marginBottom: result.note ? 12 : 0,
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                          Points Added to Wallet
+                        </div>
+                        <div style={{ fontSize: 26, fontWeight: 900, color: '#008060' }}>₹{result.points}</div>
+                      </div>
+                    )}
+                    {result.note && (
+                      <div style={{ fontSize: 13, color: '#166534', background: 'white', borderRadius: 9, padding: '10px 14px' }}>
+                        📝 {result.note}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* History */}
+                <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    📜 Bonus &amp; Note History
+                  </div>
+                  {loadingHistory ? (
+                    <div style={{ padding: 28, textAlign: 'center', color: '#697386', fontSize: 13 }}>Loading…</div>
+                  ) : history.length === 0 ? (
+                    <div style={{ padding: 28, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>No bonus or note history yet.</div>
+                  ) : (
+                    <div>
+                      {history.map((h, i) => (
+                        <div key={h.id} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 12,
+                          padding: '14px 20px',
+                          background: i % 2 === 0 ? 'white' : '#f8fafc',
+                          borderBottom: i < history.length - 1 ? '1px solid #f1f5f9' : 'none',
+                        }}>
+                          <div style={{
+                            width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                            background: h.points ? '#fef3c7' : '#eef2ff',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
+                          }}>
+                            {h.points ? '🎁' : '📝'}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                              <span style={{ fontWeight: 700, fontSize: 14, color: h.points ? '#16a34a' : '#94a3b8' }}>
+                                {h.points ? `₹${h.points} bonus` : 'Note'}
+                              </span>
+                              <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                {new Date(h.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            </div>
+                            {h.note && (
+                              <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 3 }}>{h.note}</div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+                              {h.couponCode && (
+                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#94a3b8' }}>Ref: {h.couponCode}</span>
+                              )}
+                              {h.grantedBy && (
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>· by {h.grantedBy}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
+          )}
+        </>
+      )}
+
+      {/* ════════════════════════ BULK UPLOAD TAB ════════════════════════ */}
+      {tab === 'bulk' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+
+          {/* Instructions + sample download */}
+          <div style={{
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            borderRadius: 16, padding: '24px 28px',
+            boxShadow: '0 8px 30px rgba(15,23,42,0.18)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                Bulk Distribution
+              </div>
+              <div style={{ fontSize: 14, color: 'white', fontWeight: 600 }}>
+                Upload a CSV with two columns — <span style={{ color: '#34d399' }}>Phone or Email</span> and <span style={{ color: '#34d399' }}>Bonus Points</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
+                Up to {MAX_BULK_ROWS} customers per upload
+              </div>
+            </div>
+            <button type="button" onClick={downloadSampleCsv} style={{
+              padding: '11px 20px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(255,255,255,0.08)', color: 'white', fontWeight: 700, fontSize: 13,
+              cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7,
+            }}>
+              ⬇️ Download Sample CSV
+            </button>
           </div>
+
+          {/* Dropzone */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={handleDrop}
+            style={{
+              background: bulkFile ? '#f0fdf4' : '#f8fafc',
+              border: `2px dashed ${bulkFile ? '#86efac' : '#cbd5e1'}`,
+              borderRadius: 14, padding: '40px 24px', textAlign: 'center', cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}>
+            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileInputChange} style={{ display: 'none' }} />
+            {bulkFile ? (
+              <>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#166534' }}>{bulkFile.name}</div>
+                <div style={{ fontSize: 12, color: '#16a34a', marginTop: 4 }}>
+                  {bulkRows.length} row{bulkRows.length !== 1 ? 's' : ''} ready to upload
+                </div>
+                <button type="button" onClick={(e) => { e.stopPropagation(); clearBulkFile(); }} style={{
+                  marginTop: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #86efac',
+                  background: 'white', color: '#166534', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}>
+                  Choose a different file
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>📂</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Click to upload or drag a CSV file here</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>.csv files only, max 2MB</div>
+              </>
+            )}
+          </div>
+
+          {bulkError && (
+            <div style={{
+              background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 9,
+              padding: '12px 16px', fontSize: 13, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span>⚠️</span> {bulkError}
+            </div>
+          )}
+
+          {bulkFile && bulkRows.length > 0 && !bulkResult && (
+            <button type="button" onClick={handleBulkUpload} disabled={bulkUploading} style={{
+              padding: '13px 0', borderRadius: 10, border: 'none',
+              background: bulkUploading ? 'rgba(22,163,74,0.6)' : '#16a34a',
+              color: 'white', fontWeight: 700, fontSize: 14, cursor: bulkUploading ? 'default' : 'pointer',
+              transition: 'background 0.15s',
+            }}>
+              {bulkUploading ? `Processing ${bulkRows.length} rows…` : `🚀 Distribute Bonus to ${bulkRows.length} Customer${bulkRows.length !== 1 ? 's' : ''}`}
+            </button>
+          )}
+
+          {/* Results */}
+          {bulkResult && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <StatTile label="Total Rows" value={bulkResult.totalRows} color="#3730a3" bg="#eef2ff" />
+                <StatTile label="Succeeded"  value={bulkResult.succeeded} color="#166534" bg="#f0fdf4" />
+                <StatTile label="Failed"     value={bulkResult.failed}    color="#b91c1c" bg="#fef2f2" />
+              </div>
+
+              <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                  Row-by-Row Results
+                </div>
+                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ position: 'sticky', top: 0, background: '#f8fafc' }}>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#697386', textTransform: 'uppercase' }}>Row</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#697386', textTransform: 'uppercase' }}>Phone / Email</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#697386', textTransform: 'uppercase' }}>Points</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#697386', textTransform: 'uppercase' }}>Status</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#697386', textTransform: 'uppercase' }}>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkResult.results.map(r => (
+                        <tr key={r.row} style={{ background: r.status === 'success' ? '#f0fdf4' : '#fef2f2' }}>
+                          <td style={{ padding: '9px 16px', fontSize: 12, color: '#697386', borderTop: '1px solid #f1f5f9' }}>{r.row}</td>
+                          <td style={{ padding: '9px 16px', fontSize: 12, fontFamily: 'monospace', color: 'var(--text)', borderTop: '1px solid #f1f5f9' }}>{r.identifier}</td>
+                          <td style={{ padding: '9px 16px', fontSize: 13, fontWeight: 700, color: r.status === 'success' ? '#16a34a' : '#9ca3af', borderTop: '1px solid #f1f5f9' }}>
+                            {r.points ? `₹${r.points}` : '—'}
+                          </td>
+                          <td style={{ padding: '9px 16px', borderTop: '1px solid #f1f5f9' }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, borderRadius: 20, padding: '2px 9px',
+                              background: r.status === 'success' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)',
+                              color: r.status === 'success' ? '#166534' : '#b91c1c',
+                            }}>
+                              {r.status === 'success' ? '✓ Success' : '✕ Failed'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '9px 16px', fontSize: 12, color: '#697386', borderTop: '1px solid #f1f5f9' }}>
+                            {r.status === 'success' ? (r.customerName || '—') : r.reason}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <button type="button" onClick={clearBulkFile} style={{
+                padding: '11px 0', borderRadius: 10, border: '1px solid var(--border)',
+                background: 'white', color: 'var(--text)', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+              }}>
+                Upload Another File
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
